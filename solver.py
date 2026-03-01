@@ -506,8 +506,79 @@ class Solver(object):
 
 
     def _run_one_epoch_dccrn_se_48k(self, data_loader, state='train'):
-        #TODO
-        return 0
+        if state == 'train':
+            self.model.train()
+        else:
+            self.model.eval()
+
+        num_batch = len(data_loader)
+        total_loss = 0.0
+        loss_print = 0.0
+        mse_loss_print = 0.0
+        sisnr_loss_print = 0.0
+        sisdr_loss_print = 0.0
+        stime = time.time()
+        self.optimizer.zero_grad()
+        self.accu_count = 0
+        for i, (inputs, labels) in enumerate(data_loader):
+            inputs = inputs.to(self.device)
+            labels = labels.to(self.device)
+            real_spec, imag_spec, out_wav = self.model(inputs)
+
+            loss = self.model.model.loss(out_wav, labels, real_spec, img_spec, loss_mode='SI-SNR+LMS')
+            loss_MSE = self.model.model.loss(out_wav, labels, real_spec, img_spec, loss_mode='MSE')
+            loss_SISNR = self.model.model.loss(out_wav, labels, real_spec, img_spec, loss_mode='SI-SNR')
+            loss_SISDR = self.model.model.loss(out_wav, labels, real_spec, img_spec, loss_mode='SI-SDR')
+            if torch.isnan(loss):
+                print('loss is nan, skip this batch')
+                continue
+
+            if state == 'train':
+                if self.args.accu_grad:
+                    self.accu_count += 1
+                    loss_scaled = loss/(self.args.effec_batch_size / self.args.batch_size)
+                    loss_scaled.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.batch_size)
+                    if self.accu_count == (self.args.effec_batch_size / self.args.batch_size):
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
+                        self.accu_count = 0
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                self.step += 1
+                loss_print += loss.data.cpu()
+                mse_loss_print += loss_MSE.data.cpu()
+                sisnr_loss_print += loss_SISNR.data.cpu()
+                sisdr_loss_print += loss_SISDR.data.cpu()
+
+                if (i + 1) % self.args.print_freq == 0:
+                    elapsed = time.time() - stime
+                    speed_avg = elapsed / (i + 1)
+                    lr = self.optimizer.param_groups[0]['lr']
+
+                    avg_total = loss_print / self.args.print_freq
+                    avg_mse = mse_loss_print / self.args.print_freq
+                    avg_sisnr = sisnr_loss_print / self.args.print_freq
+                    avg_sisdr = sisdr_loss_print / self.args.print_freq
+
+                    print(f'Train Epoch: {self.epoch} / {self.args.max_epoch}'
+                          f'Step: {i+1} / {num_batch} | {speed_avg:.3f}s/batch | '
+                          f'lr {lr:.1e} | '
+                          f'Total Loss: {avg_total:.4f} | '
+                          f'MSE: {avg_mse:.4f} | '
+                          f'SISNR: {-avg_sisnr:.4f} |'
+                          f'SISDR: {-avg_sisdr:.4f}'
+                          )
+
+                    loss_print = 0.0
+                    mse_loss_print = 0.0
+                    sisnr_loss_print = 0.0
+                    sisdr_loss_print = 0.0
+            total_loss += loss.data.cpu()
+        return total_loss / num_batch
 
     def _run_one_epoch_phasen_se_48k(self, data_loader, state='train'):
         #TODO
