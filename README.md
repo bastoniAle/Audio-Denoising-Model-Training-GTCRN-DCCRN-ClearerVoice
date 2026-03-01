@@ -1,7 +1,7 @@
 Inspired by ClearerVoice-Studio, train more audio enhancement models using ClearerVoice training structure.
 
 - DCUNET √
-- DCCRN
+- DCCRN √
 - PHASEN
 - DTLN
 - DPCRN
